@@ -56,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     });
 
-    // Listen for auth changes
+    // Listen for auth changes (e.g. token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, s) => {
         setSession(s);
@@ -73,8 +73,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw new Error(error.message);
+
+    // Immediately fetch profile and set user state before returning
+    // This prevents the race condition where navigate("/dashboard") fires
+    // before onAuthStateChange has time to load the profile
+    if (data.user) {
+      setSession(data.session);
+      const profile = await fetchProfile(data.user.id);
+      setUser(profile);
+    }
   }, []);
 
   const register = useCallback(async (username: string, email: string, password: string) => {
@@ -85,7 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     if (error) throw new Error(error.message);
 
-    // Create user profile row
+    // Create user profile row and set state immediately
     if (data.user) {
       const { error: profileError } = await supabase.from("users").insert({
         id: data.user.id,
@@ -97,6 +106,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (profileError) {
         console.error("Profile creation error:", profileError);
       }
+
+      setSession(data.session);
+      const profile = await fetchProfile(data.user.id);
+      setUser(profile);
     }
   }, []);
 
