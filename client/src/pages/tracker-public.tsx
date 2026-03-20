@@ -79,7 +79,7 @@ export default function TrackerPublic() {
   const params = useParams<{ slug: string }>();
 
   const { data: tracker, isLoading, error } = useQuery<PublicTracker>({
-    queryKey: ["/api/track", `/${params.slug}`],
+    queryKey: [`/api/track/${params.slug}`],
     enabled: !!params.slug,
   });
 
