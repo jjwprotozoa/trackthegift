@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase, type DbTracker } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
@@ -325,17 +325,18 @@ export default function Dashboard() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  if (authLoading) {
+  useEffect(() => {
+    if (!authLoading && !user) {
+      navigate("/login");
+    }
+  }, [authLoading, user, navigate]);
+
+  if (authLoading || !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Loader2 className="w-6 h-6 animate-spin text-primary" />
       </div>
     );
-  }
-
-  if (!user) {
-    navigate("/login");
-    return null;
   }
 
   const { data: trackersData, isLoading } = useQuery<Tracker[]>({
