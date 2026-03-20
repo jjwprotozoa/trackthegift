@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { supabase, type DbUser } from "./supabase";
 import type { Session } from "@supabase/supabase-js";
 
@@ -27,7 +27,7 @@ async function fetchProfile(userId: string): Promise<AuthUser | null> {
     .from("users")
     .select("*")
     .eq("id", userId)
-    .single();
+    .maybeSingle();
 
   if (error || !data) return null;
   const profile = data as DbUser;
@@ -44,9 +44,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Flag to suppress onAuthStateChange during manual login/register
+  const manualAuthRef = useRef(false);
 
   useEffect(() => {
-    // Get initial session
+    // Get initial session (page refresh / returning user)
     supabase.auth.getSession().then(async ({ data: { session: s } }) => {
       setSession(s);
       if (s?.user) {
@@ -56,9 +58,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     });
 
-    // Listen for auth changes (e.g. token refresh)
+    // Listen for auth changes (token refresh, sign out from another tab)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, s) => {
+        // Skip if login/register is handling state manually
+        if (manualAuthRef.current) return;
+
         setSession(s);
         if (s?.user) {
           const profile = await fetchProfile(s.user.id);
@@ -73,43 +78,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw new Error(error.message);
+    manualAuthRef.current = true;
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw new Error(error.message);
 
-    // Immediately fetch profile and set user state before returning
-    // This prevents the race condition where navigate("/dashboard") fires
-    // before onAuthStateChange has time to load the profile
-    if (data.user) {
-      setSession(data.session);
-      const profile = await fetchProfile(data.user.id);
-      setUser(profile);
+      if (data.user && data.session) {
+        setSession(data.session);
+        const profile = await fetchProfile(data.user.id);
+        setUser(profile);
+      }
+    } finally {
+      manualAuthRef.current = false;
     }
   }, []);
 
   const register = useCallback(async (username: string, email: string, password: string) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { username } },
-    });
-    if (error) throw new Error(error.message);
-
-    // Create user profile row and set state immediately
-    if (data.user) {
-      const { error: profileError } = await supabase.from("users").insert({
-        id: data.user.id,
-        username,
+    manualAuthRef.current = true;
+    try {
+      const { data, error } = await supabase.auth.signUp({
         email,
-        plan: "free",
-        track_credits: 2,
+        password,
+        options: { data: { username } },
       });
-      if (profileError) {
-        console.error("Profile creation error:", profileError);
-      }
+      if (error) throw new Error(error.message);
 
-      setSession(data.session);
-      const profile = await fetchProfile(data.user.id);
-      setUser(profile);
+      if (data.user) {
+        // Create user profile row first
+        const { error: profileError } = await supabase.from("users").insert({
+          id: data.user.id,
+          username,
+          email,
+          plan: "free",
+          track_credits: 2,
+        });
+        if (profileError) {
+          console.error("Profile creation error:", profileError);
+        }
+
+        // Now fetch the profile and set state
+        setSession(data.session);
+        const profile = await fetchProfile(data.user.id);
+        setUser(profile);
+      }
+    } finally {
+      manualAuthRef.current = false;
     }
   }, []);
 
