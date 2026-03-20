@@ -1,16 +1,20 @@
-// Shared types for Track The Gift
-// Database interactions now go through Supabase JS client directly
+import { createClient } from "@supabase/supabase-js";
 
-export interface User {
-  id: string;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+// Types matching our database schema
+export interface DbUser {
+  id: string; // UUID from Supabase Auth
   username: string;
   email: string;
   plan: string;
   track_credits: number;
-  created_at?: string;
 }
 
-export interface Tracker {
+export interface DbTracker {
   id: number;
   user_id: string;
   name: string;
@@ -27,7 +31,7 @@ export interface Tracker {
   created_at: string;
 }
 
-export interface Subscription {
+export interface DbSubscription {
   id: number;
   user_id: string;
   stripe_customer_id: string | null;

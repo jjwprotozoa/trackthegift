@@ -1,8 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
 import { useLocation, Link } from "wouter";
@@ -32,9 +30,40 @@ export default function Pricing() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
 
-  const { data: plans, isLoading } = useQuery<Plan[]>({
-    queryKey: ["/api/plans"],
-  });
+  const plans: Plan[] = [
+    {
+      id: "free",
+      name: "Free",
+      price: 0,
+      trackLimit: 2,
+      features: ["2 active trackers", "All themes", "Basic tracking page", "Email notifications"],
+    },
+    {
+      id: "pro",
+      name: "Pro",
+      price: 4.99,
+      interval: "month",
+      trackLimit: 10,
+      features: ["10 active trackers", "All themes", "Custom branding", "Priority support", "Analytics dashboard"],
+    },
+    {
+      id: "business",
+      name: "Business",
+      price: 14.99,
+      interval: "month",
+      trackLimit: -1,
+      features: ["Unlimited trackers", "All themes", "Custom branding", "White-label option", "API access", "Dedicated support"],
+    },
+    {
+      id: "single",
+      name: "Single Track",
+      price: 2.99,
+      interval: "one-time",
+      trackLimit: 1,
+      features: ["1 tracking page", "Any theme", "Active for 30 days", "Email notifications"],
+    },
+  ];
+  const isLoading = false;
 
   function handleSelectPlan(planId: string) {
     if (!user) {

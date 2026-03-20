@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase, type DbTracker } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
 import { useLocation, Link } from "wouter";
@@ -14,11 +14,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
-import type { Tracker } from "@shared/schema";
 import {
   Gift, Plus, ExternalLink, Trash2, Copy, Sun, Moon,
   LogOut, Package, Egg, TreePine, Cake, Heart, Baby,
-  MapPin, Clock, CheckCircle2, Loader2, Sparkles
+  MapPin, CheckCircle2, Loader2, Sparkles
 } from "lucide-react";
 
 const themeOptions = [
@@ -35,6 +34,50 @@ const statusConfig: Record<string, { icon: typeof Package; color: string; label:
   in_transit: { icon: MapPin, color: "text-amber-500", label: "In Transit" },
   delivered: { icon: CheckCircle2, color: "text-emerald-500", label: "Delivered" },
 };
+
+// Map DB row to frontend-friendly shape
+interface Tracker {
+  id: number;
+  userId: string;
+  name: string;
+  waybill: string;
+  carrier: string;
+  slug: string;
+  theme: string;
+  recipientName: string | null;
+  origin: string | null;
+  destination: string | null;
+  status: string;
+  statusMessage: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
+function mapTracker(row: DbTracker): Tracker {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    waybill: row.waybill,
+    carrier: row.carrier,
+    slug: row.slug,
+    theme: row.theme,
+    recipientName: row.recipient_name,
+    origin: row.origin,
+    destination: row.destination,
+    status: row.status,
+    statusMessage: row.status_message,
+    isActive: row.is_active,
+    createdAt: row.created_at,
+  };
+}
+
+function generateSlug(): string {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let slug = "";
+  for (let i = 0; i < 8; i++) slug += chars[Math.floor(Math.random() * chars.length)];
+  return slug;
+}
 
 function TrackerCard({ tracker, onDelete }: { tracker: Tracker; onDelete: (id: number) => void }) {
   const { toast } = useToast();
@@ -120,7 +163,7 @@ function TrackerCard({ tracker, onDelete }: { tracker: Tracker; onDelete: (id: n
   );
 }
 
-function CreateTrackerDialog({ userId }: { userId: number }) {
+function CreateTrackerDialog({ userId }: { userId: string }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [waybill, setWaybill] = useState("");
@@ -130,23 +173,29 @@ function CreateTrackerDialog({ userId }: { userId: number }) {
   const [origin, setOrigin] = useState("");
   const [destination, setDestination] = useState("");
   const { toast } = useToast();
+  const qc = useQueryClient();
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/trackers", {
-        userId,
+      const { data, error } = await supabase.from("trackers").insert({
+        user_id: userId,
         name,
         waybill,
         carrier,
+        slug: generateSlug(),
         theme,
-        recipientName: recipientName || null,
+        recipient_name: recipientName || null,
         origin: origin || null,
         destination: destination || null,
-      });
-      return res.json();
+        status: "created",
+        is_active: true,
+        created_at: new Date().toISOString(),
+      }).select().single();
+      if (error) throw new Error(error.message);
+      return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/trackers"] });
+      qc.invalidateQueries({ queryKey: ["trackers", userId] });
       setOpen(false);
       setName("");
       setWaybill("");
@@ -270,10 +319,19 @@ function CreateTrackerDialog({ userId }: { userId: number }) {
 }
 
 export default function Dashboard() {
-  const { user, logout } = useAuth();
+  const { user, logout, isLoading: authLoading } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const qc = useQueryClient();
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   if (!user) {
     navigate("/login");
@@ -281,15 +339,25 @@ export default function Dashboard() {
   }
 
   const { data: trackersData, isLoading } = useQuery<Tracker[]>({
-    queryKey: ["/api/trackers", `?userId=${user.id}`],
+    queryKey: ["trackers", user.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("trackers")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      if (error) throw new Error(error.message);
+      return (data as DbTracker[]).map(mapTracker);
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      await apiRequest("DELETE", `/api/trackers/${id}`);
+      const { error } = await supabase.from("trackers").delete().eq("id", id);
+      if (error) throw new Error(error.message);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/trackers"] });
+      qc.invalidateQueries({ queryKey: ["trackers", user.id] });
       toast({ title: "Tracker deleted" });
     },
   });
@@ -325,7 +393,7 @@ export default function Dashboard() {
               variant="ghost"
               size="sm"
               className="text-xs text-muted-foreground gap-1"
-              onClick={() => { logout(); navigate("/"); }}
+              onClick={async () => { await logout(); navigate("/"); }}
               data-testid="button-logout"
             >
               <LogOut className="w-3.5 h-3.5" /> Log out

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "wouter";
+import { supabase } from "@/lib/supabase";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
@@ -79,7 +80,24 @@ export default function TrackerPublic() {
   const params = useParams<{ slug: string }>();
 
   const { data: tracker, isLoading, error } = useQuery<PublicTracker>({
-    queryKey: [`/api/track/${params.slug}`],
+    queryKey: ["public-tracker", params.slug],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("trackers")
+        .select("name, theme, recipient_name, status, status_message, origin, destination")
+        .eq("slug", params.slug)
+        .single();
+      if (error) throw new Error(error.message);
+      return {
+        name: data.name,
+        theme: data.theme,
+        recipientName: data.recipient_name,
+        status: data.status,
+        statusMessage: data.status_message,
+        origin: data.origin,
+        destination: data.destination,
+      };
+    },
     enabled: !!params.slug,
   });
 
@@ -191,7 +209,7 @@ export default function TrackerPublic() {
                     </div>
 
                     {/* Content */}
-                    <div className={`pb-4 ${!isLast ? "" : ""}`}>
+                    <div className="pb-4">
                       <p className={`font-medium text-sm ${isCompleted ? "text-foreground" : "text-muted-foreground"}`}>
                         {stage.label}
                       </p>
